@@ -1,0 +1,779 @@
+<title>Paddock Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky header with KPI strip, tabbed workspace (Pipeline board / Leads table / Prospect finder), slide-in lead drawer. */
+:root {
+  --bg: #f1f3ee;          /* saltbush-grey ground */
+  --surface: #ffffff;
+  --surface-2: #e7ebe3;
+  --ink: #1d2b25;         /* eucalypt ink */
+  --muted: #5d6b63;
+  --line: #d3d9cf;
+  --accent: #b5741a;      /* ripe-wheat ochre */
+  --accent-ink: #ffffff;
+  --earth: #a3442b;       /* Eyre red soil, for overdue/critical */
+  --good: #2f7a4f;
+  --warn: #b98a12;
+  --chip: #e3e8df;
+  --shadow: 0 1px 2px rgba(29,43,37,.06), 0 8px 24px rgba(29,43,37,.08);
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131a17; --surface: #1b2420; --surface-2: #222d28; --ink: #e6ece6; --muted: #9aa89f;
+    --line: #2f3c36; --accent: #e0a54a; --accent-ink: #1a1408; --earth: #e07a5f; --good: #6cc191;
+    --warn: #e2bb4f; --chip: #26322c; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131a17; --surface: #1b2420; --surface-2: #222d28; --ink: #e6ece6; --muted: #9aa89f;
+  --line: #2f3c36; --accent: #e0a54a; --accent-ink: #1a1408; --earth: #e07a5f; --good: #6cc191;
+  --warn: #e2bb4f; --chip: #26322c; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding-inline: 16px; }
+
+header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); }
+@media (max-width: 700px) { header.top { position: static; } }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding-block: 14px 10px; }
+.brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brand h1 { font-size: 24px; font-weight: 700; }
+.brand span { color: var(--muted); font-size: 13px; }
+.bar .spacer { flex: 1; }
+.mode { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.mode i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.mode.live i { background: var(--good); }
+.mode.local i { background: var(--warn); }
+
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 12px; border-radius: 8px; cursor: pointer; font-weight: 500; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; }
+.btn.danger { color: var(--earth); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-block: 4px 12px; }
+.kpi { background: var(--surface); padding: 10px 14px; }
+.kpi b { display: block; font: 600 20px/1.2 var(--f-mono); font-variant-numeric: tabular-nums; }
+.kpi small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.kpi.alert b { color: var(--earth); }
+
+nav.tabs { display: flex; gap: 4px; overflow-x: auto; }
+nav.tabs button { border: 0; background: none; padding: 8px 12px; border-bottom: 2px solid transparent; cursor: pointer; color: var(--muted); font-weight: 600; white-space: nowrap; }
+nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+
+main { padding-block: 18px 48px; }
+.notice { background: var(--surface-2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; color: var(--muted); font-size: 13px; }
+
+/* filters */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; align-items: center; }
+.filters input, .filters select, .field input, .field select, .field textarea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; min-width: 0;
+}
+.filters input[type=search] { flex: 1 1 220px; }
+
+/* board */
+.board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
+.col { background: var(--surface-2); border-radius: 10px; padding: 8px; min-height: 160px; display: flex; flex-direction: column; gap: 8px; }
+.col.drop { outline: 2px dashed var(--accent); }
+.col h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; display: flex; justify-content: space-between; padding: 4px 4px 2px; font-family: var(--f-body); font-weight: 600; }
+.col h3 span { font-family: var(--f-mono); color: var(--muted); }
+.col .sum { font: 12px var(--f-mono); color: var(--muted); padding: 0 4px 4px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; cursor: pointer; display: grid; gap: 4px; }
+.card:hover { border-color: var(--muted); }
+.card .name { font-weight: 600; line-height: 1.3; }
+.card .meta { color: var(--muted); font-size: 12px; }
+.card .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
+.chip.ex { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
+.chip.ai { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
+.chip.due { background: var(--earth); color: var(--surface); }
+.chip.today { background: var(--warn); color: var(--surface); }
+.score { font: 600 11px var(--f-mono); padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
+.score.hot { color: var(--earth); } .score.warm { color: var(--warn); } .score.cold { color: var(--muted); }
+.empty { color: var(--muted); font-size: 12px; padding: 8px 4px; }
+
+/* table */
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { width: 100%; border-collapse: collapse; min-width: 860px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; }
+th.num { text-align: right; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+
+/* region bars */
+.split { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.panel h2 { font-size: 17px; margin-bottom: 10px; }
+.panel p.sub { color: var(--muted); margin: -6px 0 10px; font-size: 13px; }
+.rbar { display: grid; grid-template-columns: 170px 1fr 70px; gap: 10px; align-items: center; font-size: 13px; padding-block: 3px; }
+.rbar .track { height: 10px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+.rbar .fill { height: 100%; background: var(--accent); }
+.rbar .v { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+@media (max-width: 520px) { .rbar { grid-template-columns: 110px 1fr 48px; } }
+
+/* finder */
+.finder { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .finder { grid-template-columns: 1fr; } }
+.form { display: grid; gap: 10px; }
+.field { display: grid; gap: 4px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.field textarea { min-height: 70px; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 420px) { .grid2 { grid-template-columns: 1fr; } }
+.season { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; margin: 6px 0 4px; }
+.season div { text-align: center; font: 10px var(--f-mono); padding: 6px 0; border-radius: 3px; background: var(--surface-2); color: var(--muted); }
+.season div.busy { background: var(--earth); color: var(--surface); opacity: .8; }
+.season div.good { background: var(--good); color: var(--surface); }
+.season div.now { outline: 2px solid var(--ink); outline-offset: -2px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.links { display: grid; gap: 6px; }
+.links a { color: var(--ink); text-decoration: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; justify-content: space-between; gap: 10px; }
+.links a:hover { border-color: var(--accent); }
+.links a span { color: var(--muted); font-size: 12px; }
+.prospects { display: grid; gap: 10px; }
+.prospect { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.prospect h3 { font-size: 15px; font-family: var(--f-body); font-weight: 600; }
+.prospect p { margin: 0; font-size: 13px; }
+.prospect .how { color: var(--muted); }
+.events li { margin-bottom: 4px; }
+.status { font-size: 13px; color: var(--muted); }
+
+/* drawer */
+.scrim { position: fixed; inset: 0; background: rgba(10,16,13,.45); z-index: 20; }
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%); background: var(--bg); z-index: 21; overflow-y: auto; padding: calc(16px + env(safe-area-inset-top, 0px)) 16px calc(24px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--shadow); display: grid; gap: 14px; align-content: start; }
+.drawer header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.drawer h2 { font-size: 20px; }
+.log { display: grid; gap: 8px; }
+.log div { border-left: 2px solid var(--line); padding-left: 10px; font-size: 13px; }
+.log time { display: block; font: 11px var(--f-mono); color: var(--muted); }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 8px; z-index: 30; font-size: 13px; }
+textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+@media (prefers-reduced-motion: no-preference) { .drawer { animation: slide .18s ease-out; } @keyframes slide { from { transform: translateX(24px); opacity: .6; } } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="bar">
+      <div class="brand"><h1>Paddock Pipeline</h1><span>Agricultural leads across South Australia</span></div>
+      <div class="spacer"></div>
+      <span class="mode" id="mode"><i></i><span>Connecting…</span></span>
+      <button class="btn primary" id="addBtn">Add lead</button>
+    </div>
+    <div class="kpis" id="kpis"></div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="pipeline" aria-selected="true">Pipeline</button>
+      <button role="tab" data-tab="leads" aria-selected="false">All leads</button>
+      <button role="tab" data-tab="finder" aria-selected="false">Find prospects</button>
+      <button role="tab" data-tab="data" aria-selected="false">Import / export</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="notice" class="notice" hidden></div>
+
+  <section id="tab-pipeline">
+    <div class="filters">
+      <input type="search" id="q" placeholder="Search business, contact, town, notes">
+      <select id="fRegion"><option value="">All regions</option></select>
+      <select id="fSector"><option value="">All sectors</option></select>
+      <label class="mode"><input type="checkbox" id="fDue"> Follow-ups due</label>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="split">
+      <div class="panel">
+        <h2>Open pipeline by region</h2>
+        <p class="sub">Estimated annual value of leads not yet won or lost (AUD)</p>
+        <div id="regionBars"></div>
+      </div>
+      <div class="panel">
+        <h2>Follow up next</h2>
+        <p class="sub">Overdue and upcoming, soonest first</p>
+        <div id="nextUp" class="log"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-leads" hidden>
+    <div class="filters">
+      <input type="search" id="q2" placeholder="Search business, contact, town, notes">
+      <select id="fStage"><option value="">All stages</option></select>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </section>
+
+  <section id="tab-finder" hidden>
+    <div class="finder">
+      <div class="panel form">
+        <h2>Target a market</h2>
+        <div class="field"><label for="gRegion">Region</label><select id="gRegion"></select></div>
+        <div class="field"><label for="gSector">Sector</label><select id="gSector"></select></div>
+        <div class="field"><label for="gOffer">What you sell</label>
+          <input id="gOffer" value="Precision ag services: yield mapping, variable-rate seeding and soil testing"></div>
+        <div class="field"><label for="gIdeal">Ideal customer (optional)</label>
+          <input id="gIdeal" value="Family-owned operations over 1,500 ha looking to cut input costs"></div>
+        <button class="btn primary" id="genBtn">Suggest prospects with Claude</button>
+        <p class="status" id="genStatus"></p>
+      </div>
+      <div class="form">
+        <div class="panel">
+          <h2 id="seasonTitle">Timing</h2>
+          <p class="sub" id="seasonNote"></p>
+          <div class="season" id="season"></div>
+          <div class="legend"><span><i style="background:var(--good)"></i>Good time to call</span><span><i style="background:var(--earth)"></i>Peak workload, keep it brief</span><span>Outlined: this month</span></div>
+        </div>
+        <div class="panel">
+          <h2>Search for businesses</h2>
+          <p class="sub">Each link opens a pre-filled search for the region's towns. Add what you find as leads.</p>
+          <div class="links" id="links"></div>
+        </div>
+        <div class="panel">
+          <h2>Suggested prospect groups</h2>
+          <p class="sub">Claude suggests groups of businesses to target. These are leads to research, not verified contacts.</p>
+          <div class="prospects" id="prospects"><p class="empty">Pick a region and sector, then select "Suggest prospects with Claude".</p></div>
+        </div>
+        <div class="panel">
+          <h2>Field days and events</h2>
+          <p class="sub">Where SA growers gather. Confirm dates with organisers before booking.</p>
+          <ul class="events" id="events"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-data" hidden>
+    <div class="split">
+      <div class="panel form">
+        <h2>Import leads from CSV</h2>
+        <p class="sub">Columns: name, contact, phone, email, town, region, sector, hectares, value, stage, source, nextFollowUp, notes. A header row is required.</p>
+        <input type="file" id="csvFile" accept=".csv,text/csv">
+        <textarea class="csv" id="csvText" placeholder="Or paste CSV here"></textarea>
+        <div class="actions"><button class="btn primary" id="importBtn">Import</button></div>
+        <p class="status" id="importStatus"></p>
+      </div>
+      <div class="panel form">
+        <h2>Export</h2>
+        <p class="sub">Download every lead as CSV for a spreadsheet or CRM.</p>
+        <div class="actions"><button class="btn" id="exportBtn">Download CSV</button><button class="btn" id="copyBtn">Copy CSV</button></div>
+        <h2 style="margin-top:12px">Example leads</h2>
+        <p class="sub">Example rows are marked with a dashed "Example" tag.</p>
+        <div class="actions"><button class="btn danger" id="clearEx">Remove example leads</button></div>
+        <p class="status" id="exportStatus"></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="drawerRoot"></div>
+
+<script>
+(() => {
+  const STAGES = ["New", "Contacted", "Qualified", "Proposal", "Won", "Lost"];
+  const REGIONS = {
+    "Eyre Peninsula": ["Port Lincoln", "Cummins", "Tumby Bay", "Cleve", "Kimba", "Wudinna", "Ceduna", "Streaky Bay"],
+    "Yorke Peninsula": ["Kadina", "Maitland", "Minlaton", "Ardrossan", "Yorketown", "Moonta"],
+    "Clare & Mid North": ["Clare", "Jamestown", "Burra", "Crystal Brook", "Gladstone", "Snowtown", "Balaklava"],
+    "Upper North & Flinders": ["Port Augusta", "Orroroo", "Peterborough", "Quorn", "Hawker", "Booleroo Centre"],
+    "Far North & Outback": ["Marree", "Coober Pedy", "Oodnadatta", "Leigh Creek", "Roxby Downs"],
+    "Barossa": ["Nuriootpa", "Tanunda", "Angaston", "Kapunda", "Eden Valley"],
+    "Adelaide Plains": ["Virginia", "Two Wells", "Mallala", "Gawler"],
+    "Adelaide Hills": ["Mount Barker", "Lobethal", "Lenswood", "Woodside", "Hahndorf"],
+    "Fleurieu & Kangaroo Island": ["McLaren Vale", "Langhorne Creek", "Strathalbyn", "Yankalilla", "Kingscote", "Parndana"],
+    "Murraylands & Mallee": ["Murray Bridge", "Tailem Bend", "Karoonda", "Pinnaroo", "Lameroo", "Mannum"],
+    "Riverland": ["Renmark", "Berri", "Loxton", "Waikerie", "Barmera"],
+    "Limestone Coast": ["Mount Gambier", "Naracoorte", "Bordertown", "Penola", "Millicent", "Keith", "Lucindale"]
+  };
+  // busy = peak workload months (0 = Jan), good = typical planning/buying windows
+  const SECTORS = {
+    "Broadacre grain": { q: "grain grower", busy: [3,4,5,9,10,11], good: [1,2,6,7], note: "Seeding runs April to June and harvest October to December. Growers plan inputs in late summer and winter." },
+    "Sheep & wool": { q: "sheep station wool grower", busy: [3,4,8,9], good: [0,1,5,6,10], note: "Shearing and lambing times vary by district. Ask about their calendar on the first call." },
+    "Beef cattle": { q: "cattle station beef", busy: [2,3,4], good: [5,6,7,10,11], note: "Autumn weaning and sales are busy. Winter is a good window for planning." },
+    "Dairy": { q: "dairy farm", busy: [6,7,8], good: [0,1,2,3,10], note: "Milking runs every day. Spring calving and peak flush in the South East are hardest to reach." },
+    "Viticulture & wine": { q: "vineyard winery", busy: [1,2,3], good: [5,6,7,9], note: "Vintage runs February to April. Pruning season (June to August) is a good time to talk." },
+    "Citrus & horticulture": { q: "orchard citrus grower", busy: [4,5,6,7,8], good: [0,1,10,11], note: "Riverland citrus picking runs through autumn and winter." },
+    "Almonds & nuts": { q: "almond orchard", busy: [1,2,3,7], good: [4,5,6,10], note: "Harvest runs February to April and pollination in August." },
+    "Vegetables & potatoes": { q: "vegetable grower potato farm", busy: [], good: [4,5,6], note: "Production runs year round on the Adelaide Plains and in the Mallee, so book short meetings." },
+    "Aquaculture & seafood": { q: "aquaculture oyster tuna farm", busy: [11,0,1,2], good: [4,5,6,7], note: "Tuna ranching around Port Lincoln is busiest over summer. Oyster leases run year round." },
+    "Forestry & timber": { q: "plantation forestry", busy: [], good: [1,2,3,8,9], note: "Limestone Coast plantations run year round. Approach through procurement teams." },
+    "Agribusiness & services": { q: "agribusiness rural merchandise", busy: [3,4,9,10], good: [0,1,6,7], note: "Rural merchants, agronomists and contractors follow their growers' calendars." }
+  };
+  const EVENTS = [
+    ["South East Field Days", "Lucindale", "March, every year", "Limestone Coast"],
+    ["Karoonda Farm Fair", "Karoonda", "April, every second year", "Murraylands & Mallee"],
+    ["Eyre Peninsula Field Days", "Cleve", "August, every second year", "Eyre Peninsula"],
+    ["Yorke Peninsula Field Days", "Paskeville", "Spring, every second year", "Yorke Peninsula"],
+    ["Riverland Field Days", "Barmera", "Spring, every year", "Riverland"],
+    ["Royal Adelaide Show", "Wayville", "September, every year", "Adelaide Plains"],
+    ["Hart Field Day (trial site)", "Hart, near Blyth", "September, every year", "Clare & Mid North"]
+  ];
+  const MONTHS = ["J","F","M","A","M","J","J","A","S","O","N","D"];
+  const SOURCES = ["Referral", "Field day", "Cold call", "Website", "Agronomist", "Online search", "Claude suggestion", "Other"];
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const money = (n) => n ? "$" + Math.round(n).toLocaleString("en-AU") : "–";
+  const todayStr = () => new Date().toLocaleDateString("en-CA");
+  const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" }) : "";
+  const uid = () => "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  function toast(msg) {
+    const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+    document.body.append(t); setTimeout(() => t.remove(), 2600);
+  }
+
+  // ---------- scoring ----------
+  function score(l) {
+    if (l.stage === "Won" || l.stage === "Lost") return null;
+    let s = { New: 10, Contacted: 20, Qualified: 32, Proposal: 40 }[l.stage] || 10;
+    const v = Number(l.value) || 0; if (v > 0) s += Math.min(25, Math.log10(v) * 5);
+    const ha = Number(l.hectares) || 0; if (ha > 0) s += Math.min(15, Math.log10(ha) * 4);
+    if (l.phone || l.email) s += 10;
+    if (l.contact) s += 5;
+    if (l.nextFollowUp) s += 5;
+    return Math.round(Math.min(100, s));
+  }
+  const heat = (s) => s == null ? "" : s >= 65 ? "hot" : s >= 45 ? "warm" : "cold";
+  function dueState(l) {
+    if (!l.nextFollowUp || l.stage === "Won" || l.stage === "Lost") return "";
+    const t = todayStr();
+    return l.nextFollowUp < t ? "due" : l.nextFollowUp === t ? "today" : "";
+  }
+
+  // ---------- store ----------
+  const LS = "paddock-pipeline-leads";
+  const state = { leads: [], mode: "connecting", canWrite: true, tab: "pipeline", sort: ["score", -1] };
+  let db = null, downloads = null, sample = null;
+
+  const store = {
+    async save(lead) {
+      lead.updatedAt = new Date().toISOString();
+      if (db) {
+        const { id, ...body } = lead;
+        try { await db.collection("leads").doc(id).set(body); }
+        catch (e) { handleWriteError(e); throw e; }
+      } else {
+        const i = state.leads.findIndex((x) => x.id === lead.id);
+        if (i >= 0) state.leads[i] = lead; else state.leads.push(lead);
+        persistLocal(); render();
+      }
+    },
+    async remove(id) {
+      if (db) { try { await db.collection("leads").doc(id).delete(); } catch (e) { handleWriteError(e); throw e; } }
+      else { state.leads = state.leads.filter((x) => x.id !== id); persistLocal(); render(); }
+    }
+  };
+  function handleWriteError(e) {
+    if (e && e.code === "invalid_argument") { state.canWrite = false; render(); toast("You have view-only access to these leads."); }
+    else if (e && e.code === "quota_exceeded") toast("The lead store is full. Remove old leads, then try again.");
+    else toast("Could not save. Check your connection and try again.");
+  }
+  function persistLocal() { try { localStorage.setItem(LS, JSON.stringify(state.leads)); } catch (_) {} }
+  function loadLocal() {
+    try { const v = JSON.parse(localStorage.getItem(LS) || "null"); if (Array.isArray(v)) return v; } catch (_) {}
+    return null;
+  }
+  function localExamples() {
+    const t = new Date(); const d = (n) => { const x = new Date(t); x.setDate(x.getDate() + n); return x.toLocaleDateString("en-CA"); };
+    const base = { example: true, activity: [], createdAt: t.toISOString(), updatedAt: t.toISOString(), source: "Field day" };
+    return [
+      { ...base, id: uid(), name: "Example: Kimba mixed grain farm", contact: "Owner-operator", town: "Kimba", region: "Eyre Peninsula", sector: "Broadacre grain", hectares: 4200, value: 38000, stage: "Qualified", nextFollowUp: d(-2), notes: "Interested in variable-rate seeding before next season." },
+      { ...base, id: uid(), name: "Example: Riverland citrus packer", town: "Loxton", region: "Riverland", sector: "Citrus & horticulture", hectares: 300, value: 22000, stage: "Contacted", nextFollowUp: d(3) },
+      { ...base, id: uid(), name: "Example: Coonawarra vineyard", town: "Penola", region: "Limestone Coast", sector: "Viticulture & wine", hectares: 180, value: 15000, stage: "New" }
+    ];
+  }
+
+  async function connect() {
+    const c = window.claude;
+    if (!c || typeof c.use !== "function") return useLocal();
+    const [d, u, dl, sm] = await Promise.all([c.use("db"), c.use("user"), c.use("downloads"), c.use("sample")].map((p) => p.catch(() => null)));
+    downloads = dl; sample = sm;
+    if (!d) return useLocal();
+    db = d; state.mode = "live";
+    if (u) { try { const w = await u.can("data.write"); if (w === false) state.canWrite = false; } catch (_) {} }
+    db.collection("leads").onSnapshot((snap) => {
+      state.leads = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      render();
+    }, () => { setNotice("Live updates stopped. Reload the page to reconnect."); });
+    render();
+  }
+  function useLocal() {
+    state.mode = "local";
+    state.leads = loadLocal() || localExamples();
+    render();
+  }
+
+  // ---------- filtering ----------
+  function matches(l, q) {
+    if (!q) return true;
+    q = q.toLowerCase();
+    return [l.name, l.contact, l.town, l.region, l.sector, l.notes, l.email].some((v) => String(v || "").toLowerCase().includes(q));
+  }
+  function filtered() {
+    const q = $("#q").value, r = $("#fRegion").value, s = $("#fSector").value, due = $("#fDue").checked;
+    return state.leads.filter((l) => matches(l, q) && (!r || l.region === r) && (!s || l.sector === s) && (!due || dueState(l)));
+  }
+
+  // ---------- render ----------
+  function setNotice(msg) { const n = $("#notice"); n.hidden = !msg; n.textContent = msg || ""; }
+
+  function renderMode() {
+    const m = $("#mode");
+    m.className = "mode " + state.mode;
+    m.lastElementChild.textContent = state.mode === "live" ? (state.canWrite ? "Shared, saved live" : "View only") : state.mode === "local" ? "Saved in this browser only" : "Connecting…";
+    $("#addBtn").hidden = !state.canWrite;
+  }
+
+  function renderKpis() {
+    const open = state.leads.filter((l) => l.stage !== "Won" && l.stage !== "Lost");
+    const won = state.leads.filter((l) => l.stage === "Won");
+    const closed = won.length + state.leads.filter((l) => l.stage === "Lost").length;
+    const due = state.leads.filter((l) => dueState(l)).length;
+    const pipe = open.reduce((a, l) => a + (Number(l.value) || 0), 0);
+    const hot = open.filter((l) => heat(score(l)) === "hot").length;
+    const k = [
+      ["Open leads", open.length],
+      ["Open pipeline", money(pipe)],
+      ["Hot leads", hot],
+      ["Follow-ups due", due, due > 0],
+      ["Won value", money(won.reduce((a, l) => a + (Number(l.value) || 0), 0))],
+      ["Win rate", closed ? Math.round((won.length / closed) * 100) + "%" : "–"]
+    ];
+    $("#kpis").innerHTML = k.map(([l, v, a]) => `<div class="kpi${a ? " alert" : ""}"><b>${esc(v)}</b><small>${esc(l)}</small></div>`).join("");
+  }
+
+  function cardHtml(l) {
+    const s = score(l), d = dueState(l);
+    return `<div class="card" draggable="${state.canWrite}" data-id="${esc(l.id)}">
+      <div class="name">${esc(l.name)}</div>
+      <div class="meta">${esc([l.town, l.region].filter(Boolean).join(", "))}</div>
+      <div class="row">
+        ${s != null ? `<span class="score ${heat(s)}" title="Lead score">${s}</span>` : ""}
+        ${l.sector ? `<span class="chip">${esc(l.sector)}</span>` : ""}
+        ${l.value ? `<span class="chip">${money(l.value)}/yr</span>` : ""}
+        ${d === "due" ? `<span class="chip due">Overdue ${esc(fmtDate(l.nextFollowUp))}</span>` : d === "today" ? `<span class="chip today">Call today</span>` : l.nextFollowUp && s != null ? `<span class="chip">Next ${esc(fmtDate(l.nextFollowUp))}</span>` : ""}
+        ${l.example ? `<span class="chip ex">Example</span>` : ""}
+        ${l.origin === "claude" ? `<span class="chip ai">Unverified</span>` : ""}
+      </div></div>`;
+  }
+
+  function renderBoard() {
+    const list = filtered();
+    $("#board").innerHTML = STAGES.map((st) => {
+      const items = list.filter((l) => (l.stage || "New") === st).sort((a, b) => (score(b) ?? -1) - (score(a) ?? -1));
+      const sum = items.reduce((a, l) => a + (Number(l.value) || 0), 0);
+      return `<div class="col" data-stage="${st}"><h3>${st}<span>${items.length}</span></h3><div class="sum">${money(sum)}</div>
+        ${items.map(cardHtml).join("") || `<div class="empty">${state.mode === "connecting" ? "Loading leads…" : st === "New" ? "No new leads. Add one, import a CSV, or use Find prospects." : "Drag a lead here."}</div>`}</div>`;
+    }).join("");
+  }
+
+  function renderRegions() {
+    const open = state.leads.filter((l) => l.stage !== "Won" && l.stage !== "Lost");
+    const rows = Object.keys(REGIONS).map((r) => {
+      const ls = open.filter((l) => l.region === r);
+      return [r, ls.reduce((a, l) => a + (Number(l.value) || 0), 0), ls.length];
+    }).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
+    const max = Math.max(1, ...rows.map((r) => r[1]));
+    $("#regionBars").innerHTML = rows.map(([r, v, n]) =>
+      `<div class="rbar"><span>${esc(r)} <span class="mode">(${n})</span></span><div class="track"><div class="fill" style="width:${(v / max) * 100}%"></div></div><span class="v">${v ? "$" + (v >= 1000 ? Math.round(v / 1000) + "k" : v) : "–"}</span></div>`).join("");
+  }
+
+  function renderNextUp() {
+    const items = state.leads.filter((l) => l.nextFollowUp && l.stage !== "Won" && l.stage !== "Lost")
+      .sort((a, b) => a.nextFollowUp.localeCompare(b.nextFollowUp)).slice(0, 8);
+    $("#nextUp").innerHTML = items.map((l) => {
+      const d = dueState(l);
+      return `<div data-id="${esc(l.id)}" style="cursor:pointer${d === "due" ? ";border-left-color:var(--earth)" : ""}"><time>${esc(fmtDate(l.nextFollowUp))}${d === "due" ? " · overdue" : d === "today" ? " · today" : ""}</time>${esc(l.name)} <span class="mode">${esc(l.stage)}</span></div>`;
+    }).join("") || `<p class="empty">Set a follow-up date on a lead and it appears here.</p>`;
+  }
+
+  const COLS = [["name", "Business"], ["region", "Region"], ["sector", "Sector"], ["stage", "Stage"], ["hectares", "Hectares", 1], ["value", "Est. value", 1], ["score", "Score", 1], ["nextFollowUp", "Follow-up"]];
+  function renderTable() {
+    const [key, dir] = state.sort;
+    $("#thead").innerHTML = COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? "num" : ""}">${l}${k === key ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
+    const q = $("#q2").value, st = $("#fStage").value;
+    const val = (l) => key === "score" ? (score(l) ?? -1) : key === "hectares" || key === "value" ? Number(l[key]) || 0 : String(l[key] || "").toLowerCase();
+    const rows = state.leads.filter((l) => matches(l, q) && (!st || l.stage === st))
+      .sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
+    $("#tbody").innerHTML = rows.map((l) => {
+      const s = score(l), d = dueState(l);
+      return `<tr data-id="${esc(l.id)}"><td><b>${esc(l.name)}</b>${l.example ? ' <span class="chip ex">Example</span>' : ""}<div class="mode">${esc([l.contact, l.town].filter(Boolean).join(" · "))}</div></td>
+        <td>${esc(l.region)}</td><td>${esc(l.sector)}</td><td>${esc(l.stage)}</td>
+        <td class="num">${l.hectares ? Number(l.hectares).toLocaleString("en-AU") : "–"}</td><td class="num">${money(l.value)}</td>
+        <td class="num">${s != null ? `<span class="score ${heat(s)}">${s}</span>` : "–"}</td>
+        <td>${l.nextFollowUp ? `<span class="chip ${d}">${esc(fmtDate(l.nextFollowUp))}</span>` : "–"}</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="empty">No leads match.</td></tr>`;
+  }
+
+  function render() {
+    renderMode(); renderKpis(); renderBoard(); renderRegions(); renderNextUp(); renderTable();
+    $("#clearEx").disabled = !state.canWrite || !state.leads.some((l) => l.example);
+    $("#importBtn").disabled = !state.canWrite;
+  }
+
+  // ---------- drawer ----------
+  function openLead(id, preset) {
+    const existing = state.leads.find((l) => l.id === id);
+    const l = existing ? structuredClone(existing) : { id: uid(), stage: "New", activity: [], createdAt: new Date().toISOString(), ...preset };
+    const ro = !state.canWrite;
+    const opt = (arr, v) => arr.map((x) => `<option${x === v ? " selected" : ""}>${esc(x)}</option>`).join("");
+    const root = $("#drawerRoot");
+    root.innerHTML = `<div class="scrim" id="scrim"></div>
+      <aside class="drawer" role="dialog" aria-label="Lead details">
+        <header><h2>${existing ? esc(l.name) : "New lead"}</h2><button class="btn ghost" id="dClose">Close</button></header>
+        ${l.origin === "claude" ? `<div class="notice">Suggested by Claude. Confirm the business and contact details before reaching out.</div>` : ""}
+        <form class="form" id="dForm">
+          <div class="field"><label for="d-name">Business or prospect</label><input id="d-name" name="name" required value="${esc(l.name)}"></div>
+          <div class="grid2">
+            <div class="field"><label for="d-contact">Contact person</label><input id="d-contact" name="contact" value="${esc(l.contact)}"></div>
+            <div class="field"><label for="d-phone">Phone</label><input id="d-phone" name="phone" inputmode="tel" value="${esc(l.phone)}"></div>
+          </div>
+          <div class="field"><label for="d-email">Email</label><input id="d-email" name="email" type="email" value="${esc(l.email)}"></div>
+          <div class="grid2">
+            <div class="field"><label for="d-region">Region</label><select id="d-region" name="region"><option value=""></option>${opt(Object.keys(REGIONS), l.region)}</select></div>
+            <div class="field"><label for="d-town">Town</label><input id="d-town" name="town" list="townList" value="${esc(l.town)}"></div>
+          </div>
+          <datalist id="townList">${Object.values(REGIONS).flat().map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
+          <div class="grid2">
+            <div class="field"><label for="d-sector">Sector</label><select id="d-sector" name="sector"><option value=""></option>${opt(Object.keys(SECTORS), l.sector)}</select></div>
+            <div class="field"><label for="d-stage">Stage</label><select id="d-stage" name="stage">${opt(STAGES, l.stage)}</select></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label for="d-ha">Farm size (ha)</label><input id="d-ha" name="hectares" type="number" min="0" value="${esc(l.hectares)}"></div>
+            <div class="field"><label for="d-value">Est. annual value (AUD)</label><input id="d-value" name="value" type="number" min="0" step="100" value="${esc(l.value)}"></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label for="d-source">Source</label><select id="d-source" name="source"><option value=""></option>${opt(SOURCES, l.source)}</select></div>
+            <div class="field"><label for="d-next">Next follow-up</label><input id="d-next" name="nextFollowUp" type="date" value="${esc(l.nextFollowUp)}"></div>
+          </div>
+          <div class="field"><label for="d-notes">Notes</label><textarea id="d-notes" name="notes">${esc(l.notes)}</textarea></div>
+          ${ro ? "" : `<div class="actions"><button class="btn primary" type="submit">${existing ? "Save changes" : "Add lead"}</button>${existing ? `<button class="btn danger" type="button" id="dDel">Delete</button>` : ""}</div>
+          <div class="actions" id="dConfirm" hidden><span class="status">Delete this lead for everyone?</span><button class="btn danger" type="button" id="dDelYes">Delete lead</button><button class="btn" type="button" id="dDelNo">Keep</button></div>`}
+        </form>
+        ${existing ? `<section class="panel">
+          <h2>Activity</h2>
+          ${ro ? "" : `<div class="form" style="margin-bottom:10px"><div class="field"><label for="d-log">Log a call, visit or email</label><textarea id="d-log" placeholder="Spoke with owner after harvest. Wants a quote for soil testing in February."></textarea></div><div class="actions"><button class="btn" id="dLogBtn">Add to log</button>${sample ? `<button class="btn" id="dDraft">Draft follow-up with Claude</button>` : ""}</div><p class="status" id="dDraftOut" style="white-space:pre-wrap"></p></div>`}
+          <div class="log">${(l.activity || []).slice().reverse().map((a) => `<div><time>${esc(new Date(a.t).toLocaleString("en-AU", { dateStyle: "medium", timeStyle: "short" }))}</time>${esc(a.text)}</div>`).join("") || `<p class="empty">No activity logged yet.</p>`}</div>
+        </section>` : ""}
+      </aside>`;
+    if (ro) root.querySelectorAll("input,select,textarea").forEach((e) => (e.disabled = true));
+    const close = () => (root.innerHTML = "");
+    $("#scrim").onclick = close; $("#dClose").onclick = close;
+    document.addEventListener("keydown", function esc_(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc_); } });
+    $("#dForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      for (const [k, v] of f.entries()) l[k] = k === "hectares" || k === "value" ? (v === "" ? "" : Number(v)) : String(v).trim();
+      if (existing && existing.stage !== l.stage) (l.activity ||= []).push({ t: new Date().toISOString(), text: `Stage moved from ${existing.stage} to ${l.stage}` });
+      try { await store.save(l); toast(existing ? "Saved" : "Lead added"); close(); } catch (_) {}
+    };
+    const del = $("#dDel");
+    if (del) {
+      del.onclick = () => { $("#dConfirm").hidden = false; };
+      $("#dDelNo").onclick = () => { $("#dConfirm").hidden = true; };
+      $("#dDelYes").onclick = async () => { try { await store.remove(l.id); toast("Lead deleted"); close(); } catch (_) {} };
+    }
+    const logBtn = $("#dLogBtn");
+    if (logBtn) logBtn.onclick = async () => {
+      const text = $("#d-log").value.trim(); if (!text) return;
+      const cur = structuredClone(state.leads.find((x) => x.id === l.id) || l);
+      (cur.activity ||= []).push({ t: new Date().toISOString(), text });
+      cur.activity = cur.activity.slice(-200);
+      try { await store.save(cur); toast("Logged"); openLead(l.id); } catch (_) {}
+    };
+    const draft = $("#dDraft");
+    if (draft) draft.onclick = async () => {
+      const out = $("#dDraftOut"); draft.disabled = true; out.textContent = "Thinking…";
+      const hist = (l.activity || []).slice(-8).map((a) => `${a.t.slice(0, 10)}: ${a.text}`).join("\n");
+      const offer = $("#gOffer").value;
+      try {
+        const { text } = await sample(
+          `Write a short, friendly follow-up email (under 130 words, Australian English, no subject-line fluff) from a supplier to a South Australian agricultural business. Respect the farm calendar: it is currently ${new Date().toLocaleString("en-AU", { month: "long" })}.\n\nWhat we sell: ${offer}\nLead: ${l.name} (${l.sector || "sector unknown"}, ${l.town || ""} ${l.region || ""}), contact: ${l.contact || "unknown"}, stage: ${l.stage}, size: ${l.hectares || "?"} ha.\nNotes: ${l.notes || "none"}\nActivity:\n${hist || "none"}\n\nReturn only the email body.`,
+          { cache: false, onText: ({ text }) => { out.textContent = text; } });
+        out.textContent = text;
+      } catch (e) { out.textContent = e.code === "not_granted" || e.code === "sampling_disabled" ? "Claude is not available on this page." : e.code === "rate_limited" ? "Too many requests. Try again in a minute." : e.code === "cancelled" ? "" : "Could not draft right now. Try again."; }
+      draft.disabled = false;
+    };
+    setTimeout(() => $("#d-name")?.focus(), 30);
+  }
+
+  // ---------- finder ----------
+  function renderFinder() {
+    const r = $("#gRegion").value, s = $("#gSector").value, sec = SECTORS[s];
+    const now = new Date().getMonth();
+    $("#seasonTitle").textContent = `When to call: ${s}`;
+    $("#seasonNote").textContent = sec.note;
+    $("#season").innerHTML = MONTHS.map((m, i) => `<div class="${sec.busy.includes(i) ? "busy" : sec.good.includes(i) ? "good" : ""}${i === now ? " now" : ""}" title="${new Date(2000, i, 1).toLocaleString("en-AU", { month: "long" })}">${m}</div>`).join("");
+    const towns = REGIONS[r];
+    const enc = encodeURIComponent;
+    const links = [
+      ...towns.slice(0, 4).map((t) => [`Google Maps: ${sec.q} near ${t}`, `https://www.google.com/maps/search/${enc(sec.q + " near " + t + " SA")}`, "Map listings"]),
+      [`Yellow Pages: ${sec.q} in ${r}`, `https://www.yellowpages.com.au/search/listings?clue=${enc(sec.q)}&locationClue=${enc(towns[0] + " SA")}`, "Directory"],
+      [`ABN Lookup: confirm a business name`, `https://abr.business.gov.au/`, "Business register"],
+      [`LinkedIn: ${s} people in ${r}`, `https://www.linkedin.com/search/results/people/?keywords=${enc(sec.q + " " + r + " South Australia")}`, "Decision makers"],
+      [`Web search: ${s} growers groups, ${r}`, `https://www.google.com/search?q=${enc(sec.q + " grower group OR association " + r + " South Australia")}`, "Grower groups"]
+    ];
+    $("#links").innerHTML = links.map(([t, u, k]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)}<span>${esc(k)}</span></a>`).join("");
+    const ev = EVENTS.slice().sort((a, b) => (b[3] === r) - (a[3] === r));
+    $("#events").innerHTML = ev.map(([n, w, when, reg]) => `<li><b>${esc(n)}</b>, ${esc(w)} <span class="mode">${esc(when)}</span>${reg === r ? ' <span class="chip">In this region</span>' : ""}</li>`).join("");
+  }
+
+  let genCtl = null;
+  async function generate() {
+    const btn = $("#genBtn"), status = $("#genStatus"), out = $("#prospects");
+    if (!sample) { status.textContent = "Claude is not available here. Use the search links to find businesses."; return; }
+    const r = $("#gRegion").value, s = $("#gSector").value;
+    genCtl?.abort(); genCtl = new AbortController();
+    btn.disabled = true; status.textContent = "Thinking… this can take up to a minute.";
+    const existing = state.leads.filter((l) => l.region === r).map((l) => l.name).slice(0, 40).join("; ");
+    const prompt = `You are helping a sales rep generate leads in South Australian agriculture.
+Region: ${r} (towns include ${REGIONS[r].join(", ")}).
+Sector: ${s}.
+What they sell: ${$("#gOffer").value}
+Ideal customer: ${$("#gIdeal").value || "not specified"}
+Already in their pipeline: ${existing || "nothing yet"}
+
+Suggest 6 specific prospect groups to target in this region and sector. Each is a type of business in a named town or district (for example "Grain growers over 2,000 ha around Kimba"). Do not invent business names, people, phone numbers or emails. Use real SA towns, districts, grower groups or industry bodies only where you are confident they exist.
+
+Reply with only a JSON array of objects: {"title": string, "town": string, "why": string (one sentence on why they need the offer), "how": string (one sentence on how to find and approach them), "hectares": number or null (typical farm size), "value": number or null (rough annual AUD value of a customer)}.`;
+    try {
+      const data = await sample.json(prompt, { signal: genCtl.signal });
+      const list = Array.isArray(data) ? data : [];
+      out.innerHTML = list.map((p, i) => `<div class="prospect">
+        <h3>${esc(p.title)}</h3>
+        <div class="row" style="display:flex;gap:6px;flex-wrap:wrap">${p.town ? `<span class="chip">${esc(p.town)}</span>` : ""}${p.hectares ? `<span class="chip">~${Number(p.hectares).toLocaleString("en-AU")} ha</span>` : ""}${p.value ? `<span class="chip">~${money(Number(p.value))}/yr</span>` : ""}<span class="chip ai">Unverified</span></div>
+        <p>${esc(p.why)}</p><p class="how">${esc(p.how)}</p>
+        ${state.canWrite ? `<div class="actions"><button class="btn" data-add="${i}">Add to pipeline</button></div>` : ""}</div>`).join("") || `<p class="empty">No suggestions came back. Try a different sector or region.</p>`;
+      out.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
+        const p = list[Number(b.dataset.add)];
+        const lead = { id: uid(), name: String(p.title || "Prospect"), town: String(p.town || ""), region: r, sector: s, stage: "New", source: "Claude suggestion", origin: "claude",
+          hectares: Number(p.hectares) || "", value: Number(p.value) || "", notes: [p.why, p.how].filter(Boolean).join("\n"), activity: [], createdAt: new Date().toISOString() };
+        try { await store.save(lead); b.disabled = true; b.textContent = "Added"; } catch (_) {}
+      });
+      status.textContent = `${list.length} suggestions for ${s} in ${r}.`;
+    } catch (e) {
+      status.textContent = e.code === "not_granted" || e.code === "sampling_disabled" ? "Claude is not available on this page. Use the search links instead."
+        : e.code === "rate_limited" ? "Too many requests. Try again in a minute."
+        : e.code === "invalid_json" ? "The answer came back in the wrong format. Try again."
+        : e.code === "cancelled" ? "" : "Could not get suggestions right now. Try again.";
+    }
+    btn.disabled = false;
+  }
+
+  // ---------- CSV ----------
+  const CSV_COLS = ["name", "contact", "phone", "email", "town", "region", "sector", "hectares", "value", "stage", "source", "nextFollowUp", "notes"];
+  const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const toCsv = () => [CSV_COLS.join(","), ...state.leads.map((l) => CSV_COLS.map((c) => csvCell(l[c])).join(","))].join("\n");
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) { if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (ch === '"') q = false; else cell += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ",") { row.push(cell); cell = ""; }
+      else if (ch === "\n" || ch === "\r") { if (ch === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter((r) => r.some((c) => c.trim()));
+  }
+  async function importCsv() {
+    const st = $("#importStatus");
+    const rows = parseCsv($("#csvText").value);
+    if (rows.length < 2) { st.textContent = "Add a header row and at least one lead."; return; }
+    const head = rows[0].map((h) => h.trim().toLowerCase());
+    const idx = Object.fromEntries(CSV_COLS.map((c) => [c, head.indexOf(c.toLowerCase())]));
+    if (idx.name < 0) { st.textContent = 'The header row needs a "name" column.'; return; }
+    let n = 0;
+    for (const r of rows.slice(1)) {
+      const l = { id: uid(), activity: [], createdAt: new Date().toISOString(), origin: "import" };
+      for (const c of CSV_COLS) if (idx[c] >= 0) l[c] = (r[idx[c]] || "").trim();
+      if (!l.name) continue;
+      l.hectares = Number(l.hectares) || ""; l.value = Number(String(l.value || "").replace(/[$,]/g, "")) || "";
+      l.stage = STAGES.find((s) => s.toLowerCase() === String(l.stage || "").toLowerCase()) || "New";
+      l.region = Object.keys(REGIONS).find((x) => x.toLowerCase() === String(l.region || "").toLowerCase()) || l.region || "";
+      try { await store.save(l); n++; } catch (_) { break; }
+      st.textContent = `Importing… ${n}`;
+    }
+    st.textContent = `Imported ${n} lead${n === 1 ? "" : "s"}.`;
+    $("#csvText").value = "";
+  }
+
+  // ---------- wiring ----------
+  function fillSelect(sel, items, first) { sel.innerHTML = (first ? `<option value="">${first}</option>` : "") + items.map((x) => `<option>${esc(x)}</option>`).join(""); }
+  fillSelect($("#fRegion"), Object.keys(REGIONS), "All regions");
+  fillSelect($("#fSector"), Object.keys(SECTORS), "All sectors");
+  fillSelect($("#fStage"), STAGES, "All stages");
+  fillSelect($("#gRegion"), Object.keys(REGIONS));
+  fillSelect($("#gSector"), Object.keys(SECTORS));
+  ["#q", "#fRegion", "#fSector", "#fDue"].forEach((s) => $(s).addEventListener("input", renderBoard));
+  ["#q2", "#fStage"].forEach((s) => $(s).addEventListener("input", renderTable));
+  ["#gRegion", "#gSector"].forEach((s) => $(s).addEventListener("input", renderFinder));
+  $("#genBtn").onclick = generate;
+  $("#addBtn").onclick = () => openLead(null);
+  $("#thead").onclick = (e) => { const k = e.target.closest("th")?.dataset.k; if (!k) return; state.sort = [k, state.sort[0] === k ? -state.sort[1] : (k === "name" || k === "region" || k === "sector" || k === "stage" || k === "nextFollowUp" ? 1 : -1)]; renderTable(); };
+  document.addEventListener("click", (e) => {
+    const card = e.target.closest(".card, tbody tr[data-id], #nextUp [data-id]");
+    if (card && !e.target.closest("#drawerRoot")) openLead(card.dataset.id);
+  });
+  document.querySelectorAll("nav.tabs button").forEach((b) => b.onclick = () => {
+    document.querySelectorAll("nav.tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
+    ["pipeline", "leads", "finder", "data"].forEach((t) => ($("#tab-" + t).hidden = t !== b.dataset.tab));
+    try { localStorage.setItem("pp-tab", b.dataset.tab); } catch (_) {}
+  });
+  // drag and drop between stages
+  let dragId = null;
+  $("#board").addEventListener("dragstart", (e) => { dragId = e.target.closest(".card")?.dataset.id; });
+  $("#board").addEventListener("dragover", (e) => { const c = e.target.closest(".col"); if (c && dragId) { e.preventDefault(); c.classList.add("drop"); } });
+  $("#board").addEventListener("dragleave", (e) => e.target.closest(".col")?.classList.remove("drop"));
+  $("#board").addEventListener("drop", async (e) => {
+    const c = e.target.closest(".col"); if (!c || !dragId) return; e.preventDefault(); c.classList.remove("drop");
+    const l = state.leads.find((x) => x.id === dragId); dragId = null;
+    if (!l || l.stage === c.dataset.stage) return;
+    const next = structuredClone(l);
+    (next.activity ||= []).push({ t: new Date().toISOString(), text: `Stage moved from ${l.stage} to ${c.dataset.stage}` });
+    next.stage = c.dataset.stage;
+    try { await store.save(next); } catch (_) {}
+  });
+  $("#csvFile").onchange = async (e) => { const f = e.target.files[0]; if (f) $("#csvText").value = await f.text(); };
+  $("#importBtn").onclick = importCsv;
+  $("#exportBtn").onclick = async () => {
+    const st = $("#exportStatus");
+    if (!downloads) { st.textContent = "Downloads are not available here. Use Copy CSV instead."; return; }
+    try { await downloads.save({ filename: `sa-ag-leads-${todayStr()}.csv`, data: toCsv() }); st.textContent = "CSV ready."; }
+    catch (_) { st.textContent = "The download was not saved."; }
+  };
+  $("#copyBtn").onclick = () => {
+    const csv = toCsv(), st = $("#exportStatus");
+    navigator.clipboard.writeText(csv).then(() => (st.textContent = "CSV copied to clipboard."), () => { $("#csvText").value = csv; $("#csvText").select(); st.textContent = "Copy was blocked. The CSV is in the import box, selected, ready to copy."; });
+  };
+  $("#clearEx").onclick = async () => {
+    const ex = state.leads.filter((l) => l.example);
+    for (const l of ex) { try { await store.remove(l.id); } catch (_) { break; } }
+    $("#exportStatus").textContent = `Removed ${ex.length} example lead${ex.length === 1 ? "" : "s"}.`;
+  };
+
+  try { const t = localStorage.getItem("pp-tab"); if (t) document.querySelector(`nav.tabs button[data-tab="${t}"]`)?.click(); } catch (_) {}
+  renderFinder();
+  render();
+  connect();
+})();
+</script>
