@@ -36,6 +36,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); }
 h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: -.01em; }
 button, input, select, textarea { font: inherit; color: inherit; }
@@ -99,6 +100,13 @@ main { padding-block: 18px 48px; }
 .chip.ai { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
 .chip.due { background: var(--earth); color: var(--surface); }
 .chip.today { background: var(--warn); color: var(--surface); }
+.chip.abn { font-family: var(--f-mono); background: transparent; border: 1px solid var(--line); }
+.chip.abn.ok { border-color: var(--good); color: var(--good); }
+.chip.abn.bad { border-color: var(--earth); color: var(--earth); }
+.hint { font-size: 12px; color: var(--muted); }
+.hint.ok { color: var(--good); } .hint.bad { color: var(--earth); }
+.hint a, .notice a { color: inherit; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
 .score { font: 600 11px var(--f-mono); padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; }
 .score.hot { color: var(--earth); } .score.warm { color: var(--warn); } .score.cold { color: var(--muted); }
 .empty { color: var(--muted); font-size: 12px; padding: 8px 4px; }
@@ -214,6 +222,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     <div class="filters">
       <input type="search" id="q2" placeholder="Search business, contact, town, notes">
       <select id="fStage"><option value="">All stages</option></select>
+      <select id="fAbn"><option value="">Any ABN status</option><option value="missing">No ABN yet</option><option value="valid">ABN not confirmed</option><option value="confirmed">ABN confirmed</option><option value="invalid">ABN invalid</option></select>
     </div>
     <div class="tablewrap"><table>
       <thead><tr id="thead"></tr></thead>
@@ -264,7 +273,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     <div class="split">
       <div class="panel form">
         <h2>Import leads from CSV</h2>
-        <p class="sub">Columns: name, contact, phone, email, town, region, sector, hectares, value, stage, source, nextFollowUp, notes. A header row is required.</p>
+        <p class="sub">Columns: name, abn, legalName, abnConfirmed (yes/no), contact, phone, email, town, region, sector, hectares, value, stage, source, nextFollowUp, notes. A header row is required.</p>
         <input type="file" id="csvFile" accept=".csv,text/csv">
         <textarea class="csv" id="csvText" placeholder="Or paste CSV here"></textarea>
         <div class="actions"><button class="btn primary" id="importBtn">Import</button></div>
@@ -335,6 +344,25 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
   const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" }) : "";
   const uid = () => "l" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
+  // ---------- ABN ----------
+  // ABR check-digit rule: subtract 1 from the first digit, weight the 11 digits, the sum must divide by 89.
+  const ABN_W = [10, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19];
+  const abnDigits = (v) => String(v ?? "").replace(/\D/g, "");
+  function abnValid(v) {
+    const d = abnDigits(v);
+    if (d.length !== 11) return false;
+    const n = d.split("").map(Number); n[0] -= 1;
+    return n.reduce((a, x, i) => a + x * ABN_W[i], 0) % 89 === 0;
+  }
+  const abnFmt = (v) => { const d = abnDigits(v); return d.length === 11 ? `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : String(v ?? ""); };
+  const abnViewUrl = (v) => `https://abr.business.gov.au/ABN/View?abn=${abnDigits(v)}`;
+  const abnSearchUrl = (name) => `https://abr.business.gov.au/Search/ResultsActive?SearchText=${encodeURIComponent(String(name || "").replace(/^Example:\s*/i, ""))}`;
+  function abnState(l) {
+    if (!l.abn) return "missing";
+    if (!abnValid(l.abn)) return "invalid";
+    return l.abnConfirmed ? "confirmed" : "valid";
+  }
+
   function toast(msg) {
     const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
     document.body.append(t); setTimeout(() => t.remove(), 2600);
@@ -348,6 +376,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     const ha = Number(l.hectares) || 0; if (ha > 0) s += Math.min(15, Math.log10(ha) * 4);
     if (l.phone || l.email) s += 10;
     if (l.contact) s += 5;
+    const ab = abnState(l); if (ab === "confirmed") s += 8; else if (ab === "valid") s += 4;
     if (l.nextFollowUp) s += 5;
     return Math.round(Math.min(100, s));
   }
@@ -425,7 +454,9 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
   function matches(l, q) {
     if (!q) return true;
     q = q.toLowerCase();
-    return [l.name, l.contact, l.town, l.region, l.sector, l.notes, l.email].some((v) => String(v || "").toLowerCase().includes(q));
+    const qd = abnDigits(q);
+    if (qd.length >= 3 && abnDigits(l.abn).includes(qd)) return true;
+    return [l.name, l.legalName, l.contact, l.town, l.region, l.sector, l.notes, l.email].some((v) => String(v || "").toLowerCase().includes(q));
   }
   function filtered() {
     const q = $("#q").value, r = $("#fRegion").value, s = $("#fSector").value, due = $("#fDue").checked;
@@ -454,10 +485,19 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
       ["Open pipeline", money(pipe)],
       ["Hot leads", hot],
       ["Follow-ups due", due, due > 0],
+      ["ABN confirmed", `${open.filter((l) => abnState(l) === "confirmed").length} of ${open.length}`],
       ["Won value", money(won.reduce((a, l) => a + (Number(l.value) || 0), 0))],
       ["Win rate", closed ? Math.round((won.length / closed) * 100) + "%" : "–"]
     ];
     $("#kpis").innerHTML = k.map(([l, v, a]) => `<div class="kpi${a ? " alert" : ""}"><b>${esc(v)}</b><small>${esc(l)}</small></div>`).join("");
+  }
+
+  function abnChip(l) {
+    const s = abnState(l);
+    if (s === "confirmed") return `<span class="chip abn ok" title="ABN confirmed on ABN Lookup">ABN ${esc(abnFmt(l.abn))} ✓</span>`;
+    if (s === "valid") return `<span class="chip abn" title="Valid ABN format, not yet confirmed on ABN Lookup">ABN ${esc(abnFmt(l.abn))}</span>`;
+    if (s === "invalid") return `<span class="chip abn bad" title="This ABN fails the check-digit test">ABN invalid</span>`;
+    return "";
   }
 
   function cardHtml(l) {
@@ -471,7 +511,8 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
         ${l.value ? `<span class="chip">${money(l.value)}/yr</span>` : ""}
         ${d === "due" ? `<span class="chip due">Overdue ${esc(fmtDate(l.nextFollowUp))}</span>` : d === "today" ? `<span class="chip today">Call today</span>` : l.nextFollowUp && s != null ? `<span class="chip">Next ${esc(fmtDate(l.nextFollowUp))}</span>` : ""}
         ${l.example ? `<span class="chip ex">Example</span>` : ""}
-        ${l.origin === "claude" ? `<span class="chip ai">Unverified</span>` : ""}
+        ${l.origin === "claude" && !l.abnConfirmed ? `<span class="chip ai">Unverified</span>` : ""}
+        ${abnChip(l)}
       </div></div>`;
   }
 
@@ -505,22 +546,23 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     }).join("") || `<p class="empty">Set a follow-up date on a lead and it appears here.</p>`;
   }
 
-  const COLS = [["name", "Business"], ["region", "Region"], ["sector", "Sector"], ["stage", "Stage"], ["hectares", "Hectares", 1], ["value", "Est. value", 1], ["score", "Score", 1], ["nextFollowUp", "Follow-up"]];
+  const COLS = [["name", "Business"], ["abn", "ABN"], ["region", "Region"], ["sector", "Sector"], ["stage", "Stage"], ["hectares", "Hectares", 1], ["value", "Est. value", 1], ["score", "Score", 1], ["nextFollowUp", "Follow-up"]];
   function renderTable() {
     const [key, dir] = state.sort;
     $("#thead").innerHTML = COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? "num" : ""}">${l}${k === key ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
-    const q = $("#q2").value, st = $("#fStage").value;
-    const val = (l) => key === "score" ? (score(l) ?? -1) : key === "hectares" || key === "value" ? Number(l[key]) || 0 : String(l[key] || "").toLowerCase();
-    const rows = state.leads.filter((l) => matches(l, q) && (!st || l.stage === st))
+    const q = $("#q2").value, st = $("#fStage").value, ab = $("#fAbn").value;
+    const val = (l) => key === "score" ? (score(l) ?? -1) : key === "hectares" || key === "value" ? Number(l[key]) || 0 : key === "abn" ? abnDigits(l.abn) || "~" : String(l[key] || "").toLowerCase();
+    const rows = state.leads.filter((l) => matches(l, q) && (!st || l.stage === st) && (!ab || abnState(l) === ab))
       .sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
     $("#tbody").innerHTML = rows.map((l) => {
       const s = score(l), d = dueState(l);
       return `<tr data-id="${esc(l.id)}"><td><b>${esc(l.name)}</b>${l.example ? ' <span class="chip ex">Example</span>' : ""}<div class="mode">${esc([l.contact, l.town].filter(Boolean).join(" · "))}</div></td>
+        <td>${abnChip(l) || `<a class="hint" href="${esc(abnSearchUrl(l.legalName || l.name))}" target="_blank" rel="noopener">Find ABN</a>`}</td>
         <td>${esc(l.region)}</td><td>${esc(l.sector)}</td><td>${esc(l.stage)}</td>
         <td class="num">${l.hectares ? Number(l.hectares).toLocaleString("en-AU") : "–"}</td><td class="num">${money(l.value)}</td>
         <td class="num">${s != null ? `<span class="score ${heat(s)}">${s}</span>` : "–"}</td>
         <td>${l.nextFollowUp ? `<span class="chip ${d}">${esc(fmtDate(l.nextFollowUp))}</span>` : "–"}</td></tr>`;
-    }).join("") || `<tr><td colspan="8" class="empty">No leads match.</td></tr>`;
+    }).join("") || `<tr><td colspan="9" class="empty">No leads match.</td></tr>`;
   }
 
   function render() {
@@ -542,6 +584,12 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
         ${l.origin === "claude" ? `<div class="notice">Suggested by Claude. Confirm the business and contact details before reaching out.</div>` : ""}
         <form class="form" id="dForm">
           <div class="field"><label for="d-name">Business or prospect</label><input id="d-name" name="name" required value="${esc(l.name)}"></div>
+          <div class="grid2">
+            <div class="field"><label for="d-abn">ABN</label><input id="d-abn" name="abn" inputmode="numeric" placeholder="11 digits" value="${esc(abnFmt(l.abn))}"></div>
+            <div class="field"><label for="d-legal">Registered entity name</label><input id="d-legal" name="legalName" placeholder="As shown on ABN Lookup" value="${esc(l.legalName)}"></div>
+          </div>
+          <div class="hint" id="d-abnHint"></div>
+          <label class="check"><input type="checkbox" id="d-abnOk" name="abnConfirmed"${l.abnConfirmed ? " checked" : ""}> I checked this ABN is active on ABN Lookup</label>
           <div class="grid2">
             <div class="field"><label for="d-contact">Contact person</label><input id="d-contact" name="contact" value="${esc(l.contact)}"></div>
             <div class="field"><label for="d-phone">Phone</label><input id="d-phone" name="phone" inputmode="tel" value="${esc(l.phone)}"></div>
@@ -575,6 +623,18 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
         </section>` : ""}
       </aside>`;
     if (ro) root.querySelectorAll("input,select,textarea").forEach((e) => (e.disabled = true));
+    function abnHint() {
+      const v = $("#d-abn").value, d = abnDigits(v), h = $("#d-abnHint"), name = $("#d-legal").value || $("#d-name").value;
+      const find = `<a href="${esc(abnSearchUrl(name))}" target="_blank" rel="noopener">Search ABN Lookup for "${esc(String(name).replace(/^Example:\s*/i, ""))}"</a>`;
+      if (!d) { h.className = "hint"; h.innerHTML = name ? `No ABN yet. ${find}` : "Enter the business name, then search ABN Lookup."; }
+      else if (d.length !== 11) { h.className = "hint bad"; h.textContent = `An ABN has 11 digits. This one has ${d.length}.`; }
+      else if (!abnValid(d)) { h.className = "hint bad"; h.textContent = "This ABN fails the check-digit test. Check for a typo."; }
+      else { h.className = "hint ok"; h.innerHTML = `Valid ABN format. <a href="${esc(abnViewUrl(d))}" target="_blank" rel="noopener">Open the ABN Lookup record</a> to confirm it is active and matches this business.`; }
+      $("#d-abnOk").disabled = ro || !(d.length === 11 && abnValid(d));
+    }
+    ["#d-abn", "#d-legal", "#d-name"].forEach((s) => $(s).addEventListener("input", abnHint));
+    $("#d-abn").addEventListener("paste", () => setTimeout(abnHint));
+    abnHint();
     const close = () => (root.innerHTML = "");
     $("#scrim").onclick = close; $("#dClose").onclick = close;
     document.addEventListener("keydown", function esc_(e) { if (e.key === "Escape") { close(); document.removeEventListener("keydown", esc_); } });
@@ -582,6 +642,11 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
       e.preventDefault();
       const f = new FormData(e.target);
       for (const [k, v] of f.entries()) l[k] = k === "hectares" || k === "value" ? (v === "" ? "" : Number(v)) : String(v).trim();
+      l.abn = abnDigits(l.abn);
+      if (l.abn && !abnValid(l.abn)) { $("#d-abn").focus(); abnHint(); return; }
+      const ok = f.get("abnConfirmed") === "on" && !!l.abn;
+      if (ok && !l.abnConfirmed) (l.activity ||= []).push({ t: new Date().toISOString(), text: `ABN ${abnFmt(l.abn)} confirmed on ABN Lookup` });
+      l.abnConfirmed = ok;
       if (existing && existing.stage !== l.stage) (l.activity ||= []).push({ t: new Date().toISOString(), text: `Stage moved from ${existing.stage} to ${l.stage}` });
       try { await store.save(l); toast(existing ? "Saved" : "Lead added"); close(); } catch (_) {}
     };
@@ -627,7 +692,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     const links = [
       ...towns.slice(0, 4).map((t) => [`Google Maps: ${sec.q} near ${t}`, `https://www.google.com/maps/search/${enc(sec.q + " near " + t + " SA")}`, "Map listings"]),
       [`Yellow Pages: ${sec.q} in ${r}`, `https://www.yellowpages.com.au/search/listings?clue=${enc(sec.q)}&locationClue=${enc(towns[0] + " SA")}`, "Directory"],
-      [`ABN Lookup: confirm a business name`, `https://abr.business.gov.au/`, "Business register"],
+      ...towns.slice(0, 3).map((t) => [`ABN Lookup: businesses named after ${t}`, abnSearchUrl(t), "Registered ABNs"]),
       [`LinkedIn: ${s} people in ${r}`, `https://www.linkedin.com/search/results/people/?keywords=${enc(sec.q + " " + r + " South Australia")}`, "Decision makers"],
       [`Web search: ${s} growers groups, ${r}`, `https://www.google.com/search?q=${enc(sec.q + " grower group OR association " + r + " South Australia")}`, "Grower groups"]
     ];
@@ -651,7 +716,7 @@ What they sell: ${$("#gOffer").value}
 Ideal customer: ${$("#gIdeal").value || "not specified"}
 Already in their pipeline: ${existing || "nothing yet"}
 
-Suggest 6 specific prospect groups to target in this region and sector. Each is a type of business in a named town or district (for example "Grain growers over 2,000 ha around Kimba"). Do not invent business names, people, phone numbers or emails. Use real SA towns, districts, grower groups or industry bodies only where you are confident they exist.
+Suggest 6 specific prospect groups to target in this region and sector. Each is a type of business in a named town or district (for example "Grain growers over 2,000 ha around Kimba"). Do not invent business names, people, phone numbers, emails or ABNs. Use real SA towns, districts, grower groups or industry bodies only where you are confident they exist.
 
 Reply with only a JSON array of objects: {"title": string, "town": string, "why": string (one sentence on why they need the offer), "how": string (one sentence on how to find and approach them), "hectares": number or null (typical farm size), "value": number or null (rough annual AUD value of a customer)}.`;
     try {
@@ -679,7 +744,7 @@ Reply with only a JSON array of objects: {"title": string, "town": string, "why"
   }
 
   // ---------- CSV ----------
-  const CSV_COLS = ["name", "contact", "phone", "email", "town", "region", "sector", "hectares", "value", "stage", "source", "nextFollowUp", "notes"];
+  const CSV_COLS = ["name", "abn", "legalName", "abnConfirmed", "contact", "phone", "email", "town", "region", "sector", "hectares", "value", "stage", "source", "nextFollowUp", "notes"];
   const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const toCsv = () => [CSV_COLS.join(","), ...state.leads.map((l) => CSV_COLS.map((c) => csvCell(l[c])).join(","))].join("\n");
   function parseCsv(text) {
@@ -702,18 +767,20 @@ Reply with only a JSON array of objects: {"title": string, "town": string, "why"
     const head = rows[0].map((h) => h.trim().toLowerCase());
     const idx = Object.fromEntries(CSV_COLS.map((c) => [c, head.indexOf(c.toLowerCase())]));
     if (idx.name < 0) { st.textContent = 'The header row needs a "name" column.'; return; }
-    let n = 0;
+    let n = 0, badAbn = 0;
     for (const r of rows.slice(1)) {
       const l = { id: uid(), activity: [], createdAt: new Date().toISOString(), origin: "import" };
       for (const c of CSV_COLS) if (idx[c] >= 0) l[c] = (r[idx[c]] || "").trim();
       if (!l.name) continue;
+      l.abn = abnDigits(l.abn); if (l.abn && !abnValid(l.abn)) { badAbn++; }
+      l.abnConfirmed = /^(true|yes|y|1)$/i.test(String(l.abnConfirmed || "")) && abnValid(l.abn);
       l.hectares = Number(l.hectares) || ""; l.value = Number(String(l.value || "").replace(/[$,]/g, "")) || "";
       l.stage = STAGES.find((s) => s.toLowerCase() === String(l.stage || "").toLowerCase()) || "New";
       l.region = Object.keys(REGIONS).find((x) => x.toLowerCase() === String(l.region || "").toLowerCase()) || l.region || "";
       try { await store.save(l); n++; } catch (_) { break; }
       st.textContent = `Importing… ${n}`;
     }
-    st.textContent = `Imported ${n} lead${n === 1 ? "" : "s"}.`;
+    st.textContent = `Imported ${n} lead${n === 1 ? "" : "s"}.` + (badAbn ? ` ${badAbn} had an ABN that fails the check-digit test. Filter All leads by "ABN invalid" to fix them.` : "");
     $("#csvText").value = "";
   }
 
@@ -725,7 +792,7 @@ Reply with only a JSON array of objects: {"title": string, "town": string, "why"
   fillSelect($("#gRegion"), Object.keys(REGIONS));
   fillSelect($("#gSector"), Object.keys(SECTORS));
   ["#q", "#fRegion", "#fSector", "#fDue"].forEach((s) => $(s).addEventListener("input", renderBoard));
-  ["#q2", "#fStage"].forEach((s) => $(s).addEventListener("input", renderTable));
+  ["#q2", "#fStage", "#fAbn"].forEach((s) => $(s).addEventListener("input", renderTable));
   ["#gRegion", "#gSector"].forEach((s) => $(s).addEventListener("input", renderFinder));
   $("#genBtn").onclick = generate;
   $("#addBtn").onclick = () => openLead(null);

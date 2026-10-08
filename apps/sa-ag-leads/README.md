@@ -14,7 +14,8 @@ A single-page tool for generating and tracking sales leads in South Australian a
   - a list of field days in the region
   - Claude-suggested prospect groups that you can add to the pipeline. These are marked "Unverified".
 - **Activity log** for each lead, with Claude-drafted follow-up emails.
-- **CSV import and export.**
+- **ABNs**: each lead has an ABN and registered entity name. ABNs are checked with the ABR check-digit rule as you type, linked to their ABN Lookup record, and can be marked "confirmed" once checked there. Leads can be filtered by ABN status, and a confirmed ABN raises the lead score. The finder links to ABN Lookup searches for businesses named after each town. ABN Lookup is not called directly, because artifacts cannot fetch other sites, and Claude never supplies ABNs.
+- **CSV import and export** (including `abn`, `legalName`, `abnConfirmed`).
 
 ## Running it
 
