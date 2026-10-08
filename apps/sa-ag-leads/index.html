@@ -240,7 +240,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
           <input id="gOffer" value="Precision ag services: yield mapping, variable-rate seeding and soil testing"></div>
         <div class="field"><label for="gIdeal">Ideal customer (optional)</label>
           <input id="gIdeal" value="Family-owned operations over 1,500 ha looking to cut input costs"></div>
-        <button class="btn primary" id="genBtn">Suggest prospects with Claude</button>
+        <button class="btn primary" id="genBtn">Suggest businesses with Claude</button>
         <p class="status" id="genStatus"></p>
       </div>
       <div class="form">
@@ -256,9 +256,9 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
           <div class="links" id="links"></div>
         </div>
         <div class="panel">
-          <h2>Suggested prospect groups</h2>
-          <p class="sub">Claude suggests groups of businesses to target. These are leads to research, not verified contacts.</p>
-          <div class="prospects" id="prospects"><p class="empty">Pick a region and sector, then select "Suggest prospects with Claude".</p></div>
+          <h2>Suggested businesses</h2>
+          <p class="sub">Claude names businesses it knows of in this region and sector. It cannot browse the web, so check each one on ABN Lookup before you contact them.</p>
+          <div class="prospects" id="prospects"><p class="empty">Pick a region and sector, then select "Suggest businesses with Claude".</p></div>
         </div>
         <div class="panel">
           <h2>Field days and events</h2>
@@ -511,7 +511,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
         ${l.value ? `<span class="chip">${money(l.value)}/yr</span>` : ""}
         ${d === "due" ? `<span class="chip due">Overdue ${esc(fmtDate(l.nextFollowUp))}</span>` : d === "today" ? `<span class="chip today">Call today</span>` : l.nextFollowUp && s != null ? `<span class="chip">Next ${esc(fmtDate(l.nextFollowUp))}</span>` : ""}
         ${l.example ? `<span class="chip ex">Example</span>` : ""}
-        ${l.origin === "claude" && !l.abnConfirmed ? `<span class="chip ai">Unverified</span>` : ""}
+        ${l.origin === "claude" && !l.abnConfirmed ? `<span class="chip ai">Unverified</span>` : ""}${l.origin === "research" ? `<span class="chip">Researched</span>` : ""}
         ${abnChip(l)}
       </div></div>`;
   }
@@ -581,7 +581,8 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     root.innerHTML = `<div class="scrim" id="scrim"></div>
       <aside class="drawer" role="dialog" aria-label="Lead details">
         <header><h2>${existing ? esc(l.name) : "New lead"}</h2><button class="btn ghost" id="dClose">Close</button></header>
-        ${l.origin === "claude" ? `<div class="notice">Suggested by Claude. Confirm the business and contact details before reaching out.</div>` : ""}
+        ${l.origin === "claude" ? `<div class="notice">Suggested by Claude from memory. Confirm the business exists and find its ABN before reaching out.</div>` : ""}
+        ${l.origin === "research" && /Source: (https?:\/\/\S+)/.test(l.notes || "") ? `<div class="notice">Found by web research. <a href="${esc((l.notes.match(/Source: (https?:\/\/\S+)/) || [])[1])}" target="_blank" rel="noopener">Open the source</a>, and check the ABN on ABN Lookup before relying on it.</div>` : ""}
         <form class="form" id="dForm">
           <div class="field"><label for="d-name">Business or prospect</label><input id="d-name" name="name" required value="${esc(l.name)}"></div>
           <div class="grid2">
@@ -716,21 +717,21 @@ What they sell: ${$("#gOffer").value}
 Ideal customer: ${$("#gIdeal").value || "not specified"}
 Already in their pipeline: ${existing || "nothing yet"}
 
-Suggest 6 specific prospect groups to target in this region and sector. Each is a type of business in a named town or district (for example "Grain growers over 2,000 ha around Kimba"). Do not invent business names, people, phone numbers, emails or ABNs. Use real SA towns, districts, grower groups or industry bodies only where you are confident they exist.
+Name up to 8 real, established businesses in this region and sector that are likely buyers of the offer: farms, pastoral companies, wineries, packers, processors, co-operatives or agribusinesses. Only name a business if you are confident it exists and operates in this region. Prefer well-known, larger operations. Skip any already in the pipeline. If you know fewer than 8, return fewer. Never guess. Do not give people's names, phone numbers, emails, street addresses or ABNs.
 
-Reply with only a JSON array of objects: {"title": string, "town": string, "why": string (one sentence on why they need the offer), "how": string (one sentence on how to find and approach them), "hectares": number or null (typical farm size), "value": number or null (rough annual AUD value of a customer)}.`;
+Reply with only a JSON array of objects: {"name": string (the business's trading name), "town": string, "why": string (one sentence on why they need the offer), "how": string (one sentence on how to approach them), "confidence": "high" or "medium"}.`;
     try {
       const data = await sample.json(prompt, { signal: genCtl.signal });
       const list = Array.isArray(data) ? data : [];
       out.innerHTML = list.map((p, i) => `<div class="prospect">
-        <h3>${esc(p.title)}</h3>
-        <div class="row" style="display:flex;gap:6px;flex-wrap:wrap">${p.town ? `<span class="chip">${esc(p.town)}</span>` : ""}${p.hectares ? `<span class="chip">~${Number(p.hectares).toLocaleString("en-AU")} ha</span>` : ""}${p.value ? `<span class="chip">~${money(Number(p.value))}/yr</span>` : ""}<span class="chip ai">Unverified</span></div>
+        <h3>${esc(p.name || p.title)}</h3>
+        <div class="row" style="display:flex;gap:6px;flex-wrap:wrap">${p.town ? `<span class="chip">${esc(p.town)}</span>` : ""}${p.confidence === "medium" ? `<span class="chip">Medium confidence</span>` : ""}<span class="chip ai">Unverified</span><a class="hint" href="${esc(abnSearchUrl(p.name || p.title))}" target="_blank" rel="noopener">Check on ABN Lookup</a></div>
         <p>${esc(p.why)}</p><p class="how">${esc(p.how)}</p>
         ${state.canWrite ? `<div class="actions"><button class="btn" data-add="${i}">Add to pipeline</button></div>` : ""}</div>`).join("") || `<p class="empty">No suggestions came back. Try a different sector or region.</p>`;
       out.querySelectorAll("[data-add]").forEach((b) => b.onclick = async () => {
         const p = list[Number(b.dataset.add)];
-        const lead = { id: uid(), name: String(p.title || "Prospect"), town: String(p.town || ""), region: r, sector: s, stage: "New", source: "Claude suggestion", origin: "claude",
-          hectares: Number(p.hectares) || "", value: Number(p.value) || "", notes: [p.why, p.how].filter(Boolean).join("\n"), activity: [], createdAt: new Date().toISOString() };
+        const lead = { id: uid(), name: String(p.name || p.title || "Prospect"), town: String(p.town || ""), region: r, sector: s, stage: "New", source: "Claude suggestion", origin: "claude",
+          hectares: "", value: "", notes: [p.why, p.how].filter(Boolean).join("\n"), activity: [], createdAt: new Date().toISOString() };
         try { await store.save(lead); b.disabled = true; b.textContent = "Added"; } catch (_) {}
       });
       status.textContent = `${list.length} suggestions for ${s} in ${r}.`;
