@@ -93,6 +93,11 @@ main { padding-block: 18px 48px; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; cursor: pointer; display: grid; gap: 4px; }
 .card:hover { border-color: var(--muted); }
 .card .name { font-weight: 600; line-height: 1.3; }
+.card .top { display: flex; gap: 6px; align-items: start; justify-content: space-between; }
+.card-del { flex: none; border: 1px solid transparent; background: none; color: var(--muted); border-radius: 6px; padding: 1px 6px; font-size: 12px; cursor: pointer; }
+.card-del:hover, .card-del:focus-visible { color: var(--earth); border-color: var(--earth); }
+.card .confirm { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--earth); }
+.card .confirm button { font-size: 12px; padding: 2px 8px; }
 .card .meta { color: var(--muted); font-size: 12px; }
 .card .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 11px; white-space: nowrap; }
@@ -514,8 +519,10 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
 
   function cardHtml(l) {
     const s = score(l), d = dueState(l);
+    const canDel = state.canWrite && (l.stage || "New") === "New";
     return `<div class="card" draggable="${state.canWrite}" data-id="${esc(l.id)}">
-      <div class="name">${esc(l.name)}</div>
+      <div class="top"><div class="name">${esc(l.name)}</div>${canDel && state.pendingDel !== l.id ? `<button class="card-del" type="button" data-del="${esc(l.id)}" aria-label="Delete ${esc(l.name)}">Delete</button>` : ""}</div>
+      ${state.pendingDel === l.id ? `<div class="confirm">Delete this lead for everyone?<button class="btn danger" type="button" data-del-yes="${esc(l.id)}">Delete</button><button class="btn" type="button" data-del-no>Keep</button></div>` : ""}
       <div class="meta">${esc([l.town, l.region].filter(Boolean).join(", "))}</div>
       <div class="row">
         ${s != null ? `<span class="score ${heat(s)}" title="Lead score">${s}</span>` : ""}
@@ -832,7 +839,16 @@ Reply with only a JSON array of objects: {"name": string (the business's trading
   $("#genBtn").onclick = generate;
   $("#addBtn").onclick = () => openLead(null);
   $("#thead").onclick = (e) => { const k = e.target.closest("th")?.dataset.k; if (!k) return; state.sort = [k, state.sort[0] === k ? -state.sort[1] : (k === "name" || k === "region" || k === "sector" || k === "stage" || k === "nextFollowUp" ? 1 : -1)]; renderTable(); };
-  document.addEventListener("click", (e) => {
+  document.addEventListener("click", async (e) => {
+    const del = e.target.closest("[data-del]"), yes = e.target.closest("[data-del-yes]"), no = e.target.closest("[data-del-no]");
+    if (del) { state.pendingDel = del.dataset.del; renderBoard(); return; }
+    if (no) { state.pendingDel = null; renderBoard(); return; }
+    if (yes) {
+      const id = yes.dataset.delYes; yes.disabled = true;
+      try { await store.remove(id); state.pendingDel = null; toast("Lead deleted"); } catch (_) { yes.disabled = false; }
+      renderBoard(); return;
+    }
+    if (e.target.closest(".card .confirm")) return;
     const card = e.target.closest(".card, tbody tr[data-id], #nextUp [data-id]");
     if (card && !e.target.closest("#drawerRoot")) openLead(card.dataset.id);
   });
