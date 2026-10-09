@@ -273,7 +273,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     <div class="split">
       <div class="panel form">
         <h2>Import leads from CSV</h2>
-        <p class="sub">Columns: name, abn, legalName, abnConfirmed (yes/no), contact, phone, email, town, region, sector, hectares, value, stage, source, nextFollowUp, notes. A header row is required.</p>
+        <p class="sub">Columns: name, abn, acn, legalName, abnConfirmed (yes/no), contact, phone, email, town, region, sector, hectares, value, stage, source, nextFollowUp, notes. A header row is required.</p>
         <input type="file" id="csvFile" accept=".csv,text/csv">
         <textarea class="csv" id="csvText" placeholder="Or paste CSV here"></textarea>
         <div class="actions"><button class="btn primary" id="importBtn">Import</button></div>
@@ -357,6 +357,18 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
   const abnFmt = (v) => { const d = abnDigits(v); return d.length === 11 ? `${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8)}` : String(v ?? ""); };
   const abnViewUrl = (v) => `https://abr.business.gov.au/ABN/View?abn=${abnDigits(v)}`;
   const abnSearchUrl = (name) => `https://abr.business.gov.au/Search/ResultsActive?SearchText=${encodeURIComponent(String(name || "").replace(/^Example:\s*/i, ""))}`;
+  // ACN: 9 digits; weights 8..1 on the first 8, check digit = (10 - sum % 10) % 10.
+  const acnDigits = (v) => String(v ?? "").replace(/\D/g, "");
+  function acnValid(v) {
+    const d = acnDigits(v);
+    if (d.length !== 9) return false;
+    const sum = [8, 7, 6, 5, 4, 3, 2, 1].reduce((a, w, i) => a + w * Number(d[i]), 0);
+    return (10 - (sum % 10)) % 10 === Number(d[8]);
+  }
+  const acnFmt = (v) => { const d = acnDigits(v); return d.length === 9 ? `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}` : String(v ?? ""); };
+  const isCompanyName = (n) => /\b(pty\.?|proprietary|limited|ltd\.?)\b/i.test(String(n || ""));
+  // A company's ABN is normally 2 digits followed by its ACN.
+  const acnFromAbn = (abn) => { const d = abnDigits(abn); return d.length === 11 && abnValid(d) && acnValid(d.slice(2)) ? d.slice(2) : ""; };
   function abnState(l) {
     if (!l.abn) return "missing";
     if (!abnValid(l.abn)) return "invalid";
@@ -455,7 +467,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     if (!q) return true;
     q = q.toLowerCase();
     const qd = abnDigits(q);
-    if (qd.length >= 3 && abnDigits(l.abn).includes(qd)) return true;
+    if (qd.length >= 3 && (abnDigits(l.abn).includes(qd) || acnDigits(l.acn).includes(qd))) return true;
     return [l.name, l.legalName, l.contact, l.town, l.region, l.sector, l.notes, l.email].some((v) => String(v || "").toLowerCase().includes(q));
   }
   function filtered() {
@@ -557,7 +569,7 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
     $("#tbody").innerHTML = rows.map((l) => {
       const s = score(l), d = dueState(l);
       return `<tr data-id="${esc(l.id)}"><td><b>${esc(l.name)}</b>${l.example ? ' <span class="chip ex">Example</span>' : ""}<div class="mode">${esc([l.contact, l.town].filter(Boolean).join(" · "))}</div></td>
-        <td>${abnChip(l) || `<a class="hint" href="${esc(abnSearchUrl(l.legalName || l.name))}" target="_blank" rel="noopener">Find ABN</a>`}</td>
+        <td>${abnChip(l) || `<a class="hint" href="${esc(abnSearchUrl(l.legalName || l.name))}" target="_blank" rel="noopener">Find ABN</a>`}${l.acn ? `<div class="hint" style="font-family:var(--f-mono)">ACN ${esc(acnFmt(l.acn))}</div>` : ""}</td>
         <td>${esc(l.region)}</td><td>${esc(l.sector)}</td><td>${esc(l.stage)}</td>
         <td class="num">${l.hectares ? Number(l.hectares).toLocaleString("en-AU") : "–"}</td><td class="num">${money(l.value)}</td>
         <td class="num">${s != null ? `<span class="score ${heat(s)}">${s}</span>` : "–"}</td>
@@ -591,6 +603,11 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
           </div>
           <div class="hint" id="d-abnHint"></div>
           <label class="check"><input type="checkbox" id="d-abnOk" name="abnConfirmed"${l.abnConfirmed ? " checked" : ""}> I checked this ABN is active on ABN Lookup</label>
+          <div class="grid2">
+            <div class="field"><label for="d-acn">ACN</label><input id="d-acn" name="acn" inputmode="numeric" placeholder="9 digits, companies only" value="${esc(acnFmt(l.acn))}"></div>
+            <div class="field" style="align-content:end"><button class="btn" type="button" id="d-acnFill" hidden>Use ACN from ABN</button></div>
+          </div>
+          <div class="hint" id="d-acnHint"></div>
           <div class="grid2">
             <div class="field"><label for="d-contact">Contact person</label><input id="d-contact" name="contact" value="${esc(l.contact)}"></div>
             <div class="field"><label for="d-phone">Phone</label><input id="d-phone" name="phone" inputmode="tel" value="${esc(l.phone)}"></div>
@@ -632,7 +649,21 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
       else if (!abnValid(d)) { h.className = "hint bad"; h.textContent = "This ABN fails the check-digit test. Check for a typo."; }
       else { h.className = "hint ok"; h.innerHTML = `Valid ABN format. <a href="${esc(abnViewUrl(d))}" target="_blank" rel="noopener">Open the ABN Lookup record</a> to confirm it is active and matches this business.`; }
       $("#d-abnOk").disabled = ro || !(d.length === 11 && abnValid(d));
+      acnHint();
     }
+    function acnHint() {
+      const a = acnDigits($("#d-acn").value), h = $("#d-acnHint"), fill = $("#d-acnFill");
+      const fromAbn = acnFromAbn($("#d-abn").value), company = isCompanyName($("#d-legal").value || $("#d-name").value);
+      fill.hidden = ro || !fromAbn || a === fromAbn;
+      fill.textContent = `Use ACN ${acnFmt(fromAbn)} from ABN`;
+      if (!a) { h.className = "hint"; h.textContent = fromAbn ? (company ? "This company's ACN is usually the last 9 digits of its ABN." : "If this business is a company, its ACN is usually the last 9 digits of its ABN. Sole traders, partnerships and trusts have no ACN.") : "Only companies (Pty Ltd, Limited) have an ACN. ABN Lookup shows it on the ABN record."; }
+      else if (a.length !== 9) { h.className = "hint bad"; h.textContent = `An ACN has 9 digits. This one has ${a.length}.`; }
+      else if (!acnValid(a)) { h.className = "hint bad"; h.textContent = "This ACN fails the check-digit test. Check for a typo."; }
+      else if (abnDigits($("#d-abn").value).length === 11 && abnDigits($("#d-abn").value).slice(2) !== a) { h.className = "hint"; h.textContent = "Valid ACN format. It doesn't match the last 9 digits of the ABN, which is unusual for a company. Check both on ABN Lookup."; }
+      else { h.className = "hint ok"; h.textContent = "Valid ACN format."; }
+    }
+    $("#d-acn").addEventListener("input", acnHint);
+    $("#d-acnFill").onclick = () => { $("#d-acn").value = acnFmt(acnFromAbn($("#d-abn").value)); acnHint(); };
     ["#d-abn", "#d-legal", "#d-name"].forEach((s) => $(s).addEventListener("input", abnHint));
     $("#d-abn").addEventListener("paste", () => setTimeout(abnHint));
     abnHint();
@@ -648,6 +679,8 @@ textarea.csv { width: 100%; min-height: 140px; font: 12px var(--f-mono); backgro
       const ok = f.get("abnConfirmed") === "on" && !!l.abn;
       if (ok && !l.abnConfirmed) (l.activity ||= []).push({ t: new Date().toISOString(), text: `ABN ${abnFmt(l.abn)} confirmed on ABN Lookup` });
       l.abnConfirmed = ok;
+      l.acn = acnDigits(l.acn);
+      if (l.acn && !acnValid(l.acn)) { $("#d-acn").focus(); acnHint(); return; }
       if (existing && existing.stage !== l.stage) (l.activity ||= []).push({ t: new Date().toISOString(), text: `Stage moved from ${existing.stage} to ${l.stage}` });
       try { await store.save(l); toast(existing ? "Saved" : "Lead added"); close(); } catch (_) {}
     };
@@ -745,7 +778,7 @@ Reply with only a JSON array of objects: {"name": string (the business's trading
   }
 
   // ---------- CSV ----------
-  const CSV_COLS = ["name", "abn", "legalName", "abnConfirmed", "contact", "phone", "email", "town", "region", "sector", "hectares", "value", "stage", "source", "nextFollowUp", "notes"];
+  const CSV_COLS = ["name", "abn", "acn", "legalName", "abnConfirmed", "contact", "phone", "email", "town", "region", "sector", "hectares", "value", "stage", "source", "nextFollowUp", "notes"];
   const csvCell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const toCsv = () => [CSV_COLS.join(","), ...state.leads.map((l) => CSV_COLS.map((c) => csvCell(l[c])).join(","))].join("\n");
   function parseCsv(text) {
@@ -775,6 +808,7 @@ Reply with only a JSON array of objects: {"name": string (the business's trading
       if (!l.name) continue;
       l.abn = abnDigits(l.abn); if (l.abn && !abnValid(l.abn)) { badAbn++; }
       l.abnConfirmed = /^(true|yes|y|1)$/i.test(String(l.abnConfirmed || "")) && abnValid(l.abn);
+      l.acn = acnDigits(l.acn); if (l.acn && !acnValid(l.acn)) l.acn = "";
       l.hectares = Number(l.hectares) || ""; l.value = Number(String(l.value || "").replace(/[$,]/g, "")) || "";
       l.stage = STAGES.find((s) => s.toLowerCase() === String(l.stage || "").toLowerCase()) || "New";
       l.region = Object.keys(REGIONS).find((x) => x.toLowerCase() === String(l.region || "").toLowerCase()) || l.region || "";

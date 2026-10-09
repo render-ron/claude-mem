@@ -15,7 +15,8 @@ A single-page tool for generating and tracking sales leads in South Australian a
   - Claude-suggested named businesses for the chosen region and sector, from memory (Claude cannot browse in the page). These are marked "Unverified" and link to ABN Lookup.
 - **Activity log** for each lead, with Claude-drafted follow-up emails.
 - **ABNs**: each lead has an ABN and registered entity name. ABNs are checked with the ABR check-digit rule as you type, linked to their ABN Lookup record, and can be marked "confirmed" once checked there. Leads can be filtered by ABN status, and a confirmed ABN raises the lead score. The finder links to ABN Lookup searches for businesses named after each town. ABN Lookup is not called directly, because artifacts cannot fetch other sites, and Claude never supplies ABNs.
-- **CSV import and export** (including `abn`, `legalName`, `abnConfirmed`).
+- **ACNs**: companies (Pty Ltd, Limited) get an ACN field under the ABN, checked with the ASIC check-digit rule. When the ABN contains a valid ACN in its last 9 digits, a button fills it in.
+- **CSV import and export** (including `abn`, `acn`, `legalName`, `abnConfirmed`).
 
 ## Running it
 
